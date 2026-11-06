@@ -1,0 +1,6 @@
+{
+  "name": "live-round",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node tests/sim.js" }
+}
