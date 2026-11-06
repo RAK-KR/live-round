@@ -88,7 +88,7 @@ function startMatch(cfg) {
 async function startRound() {
   const tk = SES, cfg = M.mode === 'endless' ? endlessCfg(M.n) : M.rounds[M.ri];
   G = new Game(cfg); scene.reset(); scene.v = null; scene.fx.black = 1; closeTip(); setCtl(false);
-  $('log').innerHTML = ''; $('known').innerHTML = ''; $('stageName').textContent = M.opp.name;
+  $('log').innerHTML = ''; $('known').innerHTML = ''; $('hp').innerHTML = ''; $('stageName').textContent = M.opp.name;
   const rn = M.mode === 'endless' ? M.n + 1 : M.ri + 1;
   $('roundInfo').textContent = M.mode === 'endless' ? `ROUND ${rn} · ${LV[M.lv]}` : `ROUND ${rn} / ${M.rounds.length}`;
   await banner(`ROUND ${rn}`, cfg.sudden ? '체력 2 이하에서 생명 유지 장치가 끊어집니다' : '');
@@ -176,7 +176,12 @@ function log(msg, cls = '') {
   while (L.children.length > 3) L.firstChild.remove();
 }
 const say = l => { log(`“${l}”`, 'opp'); sfx.whisper(); };
-function applySnap(sn) { scene.v = { ...sn, max: G.cfg.hp, sudden: sn.hp.map(h => !!G.cfg.sudden && h <= 2) }; }
+function applySnap(sn) { scene.v = { ...sn, max: G.cfg.hp, sudden: sn.hp.map(h => !!G.cfg.sudden && h <= 2) }; drawHp(); }
+function drawHp() {
+  const v = scene.v; if (!v || !M) return;
+  const bar = p => Array.from({ length: v.max }, (_, i) => `<b class="${i < v.hp[p] ? (v.sudden[p] ? 'sd' : 'on') : ''}"></b>`).join('');
+  $('hp').innerHTML = `<span>${M.opp.name}</span>${bar(1)}<em></em><span>당신</span>${bar(0)}`;
+}
 async function banner(t, s) {
   const b = $('banner'); b.innerHTML = `<div>${t}</div>${s ? `<small>${s}</small>` : ''}`; b.classList.add('on');
   await wait(1500); b.classList.remove('on'); await wait(450);
@@ -187,15 +192,12 @@ function updKnown() {
 }
 const ANIM = {
   async load(e) {
-    applySnap({ ...e.snap, items: scene.v ? scene.v.items : [[], []] });
-    scene.gun.hide = true; scene.shells = { live: e.live, blank: e.blank }; sfx.shells(e.live + e.blank);
-    log(`실탄 ${e.live}발, 공포탄 ${e.blank}발이 장전됩니다.`, 'sys');
-    await wait(2300);
-    scene.shells = null; scene.gun.hide = false; sfx.rack();
-    const got = e.snap.items[0].length - scene.v.items[0].length;
-    applySnap(e.snap);
-    if (got > 0) { sfx.drop(Math.min(4, got)); log('아이템이 배분됩니다.', 'sys'); await wait(700); }
-    log('당신의 차례입니다.', 'sys'); await wait(300);
+    const old = scene.v ? scene.v.items : [[], []];
+    applySnap({ ...e.snap, items: old });
+    log(`실탄 ${e.live}발, 공포탄 ${e.blank}발.`, 'sys');
+    await scene.loadShells(e.live, e.blank);
+    if (e.snap.items.some((a, p) => a.length > old[p].length)) { log('아이템 상자가 올라옵니다.', 'sys'); await scene.dealItems(old, e.snap.items); }
+    applySnap(e.snap); log('당신의 차례입니다.', 'sys');
   },
   async turn(e) { applySnap(e.snap); if (e.p === 0) log('당신의 차례입니다.', 'sys'); },
   async skip(e) { applySnap(e.snap); sfx.cuffs(); log(`${who(e.p)} 수갑에 묶여 차례를 건너뜁니다.`, 'sys'); await wait(800); },
@@ -216,7 +218,7 @@ const ANIM = {
     } else {
       sfx.click(); log(self && e.by === 0 ? '찰칵. 공포탄입니다. 한 번 더 당신의 차례입니다.' : '찰칵. 공포탄입니다.'); await wait(700);
     }
-    scene.gun.kt = 0; scene.look = 0; await wait(380); sfx.rack(); applySnap(e.snap);
+    scene.gun.kt = 0; scene.look = 0; await wait(380); scene.rack(); applySnap(e.snap);
     if (Math.random() < .3 && e.snap.hp[0] > 0 && e.snap.hp[1] > 0) say(pick(e.live && e.target === 1 ? M.opp.hurt : M.opp.taunt));
   },
   async item(e) {
@@ -227,7 +229,7 @@ const ANIM = {
       case 'magnifier': m = me ? `돋보기로 약실을 들여다봅니다. 현재 탄은 ${SN(e.live)}입니다.` : `${W} 돋보기로 약실을 들여다봅니다.`; break;
       case 'cuffs': m = me ? `${opp}에게 수갑을 채웠습니다.` : `${W} 당신에게 수갑을 채웠습니다.`; break;
       case 'saw': m = `${W} 총열을 잘라냅니다. 다음 한 발은 피해가 2배입니다.`; break;
-      case 'beer': sfx.rack(); m = `${W} 펌프를 당겨 탄을 빼냅니다. 빠져나온 것은 ${SN(e.live)}입니다.`; break;
+      case 'beer': scene.rack(); m = `${W} 펌프를 당겨 탄을 빼냅니다. 빠져나온 것은 ${SN(e.live)}입니다.`; break;
       case 'cigs': m = e.heal ? `${W} 담배를 피웁니다. 체력 +${e.heal}.` : G.cfg.sudden && e.snap.hp[e.by] <= 2 ? `${W} 담배를 피우지만, 생명 유지 장치가 끊겨 회복되지 않습니다.` : `${W} 담배를 피웁니다. 회복할 체력이 없습니다.`; break;
       case 'meds': m = e.hurt ? `${W} 약을 삼킵니다. 상한 약이었습니다. 체력 -1.` : e.heal ? `${W} 약을 삼킵니다. 체력 +${e.heal}.` : `${W} 약을 삼키지만 아무 일도 일어나지 않습니다.`; break;
       case 'phone': m = me ? (e.pos != null ? `수화기 너머의 목소리: “${e.pos + 1}번째 탄은... ${SN(e.live)}.”` : '수화기 너머의 목소리: “...안타깝군.”') : `${W} 대포폰에 귀를 기울입니다.`; break;

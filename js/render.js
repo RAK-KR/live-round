@@ -1,5 +1,7 @@
 // Three.js 3D 장면 — 저해상도 렌더 + 디더링/그레인 후처리 (PS1 풍)
 import * as T from './lib/three.module.min.js';
+import { sfx } from './audio.js';
+const wait = ms => new Promise(r => setTimeout(r, ms)), ease = k => k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
 
 const mul = s => () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 const PSL = [[-.52, .2], [-.3, .2], [-.52, .4], [-.3, .4], [.3, .2], [.52, .2], [.3, .4], [.52, .4]];
@@ -103,7 +105,7 @@ function itemMesh(k) {
 export class Scene {
   constructor(cv) {
     this.cv = cv; this.t = 0; this.v = null; this.sel = -1; this.steal = false; this.dis = null; this.shells = null; this.float = null;
-    this.blink = 0; this.flk = 1; this.look = 0; this.crack = 0; this._crack = -1; this._ik = ''; this.twitch = 0;
+    this.blink = 0; this.flk = 1; this.tw = []; this.look = 0; this.crack = 0; this._crack = -1; this._ik = ''; this.twitch = 0;
     this.r = new T.WebGLRenderer({ canvas: cv, antialias: false, powerPreference: 'high-performance' });
     this.r.shadowMap.enabled = true; this.r.shadowMap.type = T.PCFShadowMap; this.r.setPixelRatio(1);
     makeTextures();
@@ -197,7 +199,7 @@ export class Scene {
     g.add(mesh(new T.BoxGeometry(.04, .06, .15), std('#1d1d1f', { metalness: .6, roughness: .5 }), 0, 0, -.01));
     this.barrel = mesh(new T.CylinderGeometry(.015, .015, 1, 12), std('#1e1e22', { metalness: .85, roughness: .5 })); this.barrel.rotation.x = Math.PI / 2; g.add(this.barrel);
     this.tube = mesh(new T.CylinderGeometry(.01, .01, 1, 8), std('#232326', { metalness: .6, roughness: .5 })); this.tube.rotation.x = Math.PI / 2; g.add(this.tube);
-    g.add(mesh(new T.CylinderGeometry(.019, .019, .13, 10), MAT.wood, 0, -.024, .19)).rotation.x = Math.PI / 2;
+    this.pump = mesh(new T.CylinderGeometry(.019, .019, .13, 10), MAT.wood, 0, -.024, .19); this.pump.rotation.x = Math.PI / 2; g.add(this.pump);
     const tg = mesh(new T.TorusGeometry(.018, .003, 4, 10, Math.PI), MAT.dark, 0, -.03, -.03); tg.rotation.set(0, Math.PI / 2, Math.PI); g.add(tg);
     this.muzzle = new T.Object3D(); g.add(this.muzzle); this.bore = mesh(new T.CircleGeometry(.0105, 12), new T.MeshBasicMaterial({ color: '#000' }), 0, 0, .001, false); this.muzzle.add(this.bore);
     this.flashL = new T.PointLight('#ffb060', 0, 4, 1.2); this.muzzle.add(this.flashL);
@@ -217,15 +219,25 @@ export class Scene {
     this.candles = [0, 1].map(p => {
       const grp = new T.Group(); S.add(grp); const list = [];
       for (let i = 0; i < 6; i++) {
-        const h = .06 + ((i * 7) % 5) * .008, c = mesh(new T.CylinderGeometry(.012, .013, h, 8), MAT.wax, 0, h / 2, 0); grp.add(c);
+        const h = .085 + ((i * 7) % 5) * .012, c = mesh(new T.CylinderGeometry(.019, .021, h, 10), MAT.wax, 0, h / 2, 0); grp.add(c);
         const fl = new T.Sprite(new T.SpriteMaterial({ map: TEX.glow, color: '#ffb050', blending: T.AdditiveBlending, depthWrite: false }));
-        fl.position.set(0, h + .016, 0); c.parent.add(fl);
+        fl.position.set(0, h + .03, 0); c.parent.add(fl);
         list.push({ c, fl, h });
       }
-      const L = new T.PointLight('#ff8a3a', 0, 1.6, 1.4); L.position.set(0, .12, p ? .1 : 0); grp.add(L);
-      grp.position.set(0, 0, p ? -.44 : .44); return { grp, list, L };
+      const L = new T.PointLight('#ff8a3a', 0, 2, 1.2); L.position.set(0, .2, p ? .1 : -.05); grp.add(L);
+      grp.position.set(0, 0, p ? -.46 : .3); return { grp, list, L };
     });
-    this.shellG = new T.Group(); S.add(this.shellG);
+    this.flyG = new T.Group(); S.add(this.flyG);
+    this.boxes = [0, 1].map(p => {
+      const b = new T.Group(); b.visible = false; S.add(b);
+      const wd = std('#3a2414', { map: TEX.wood }), iron = std('#2a2622', { metalness: .6, roughness: .6 });
+      b.add(mesh(new T.BoxGeometry(.3, .1, .18), wd, 0, -.05, 0), mesh(new T.BoxGeometry(.31, .012, .19), iron, 0, -.02, 0));
+      b.lid = new T.Group(); b.lid.position.set(0, 0, p ? .09 : -.09); b.add(b.lid);
+      b.lid.add(mesh(new T.BoxGeometry(.31, .02, .19), wd, 0, .01, p ? -.095 : .095));
+      const inner = new T.PointLight('#ffcf9a', 0, .6, 1.5); inner.position.set(0, .05, 0); b.add(inner); b.inner = inner;
+      return b;
+    });
+    this.shellG = new T.Group(); this.shellG.visible = false; S.add(this.shellG);
     this.shellM = [...Array(8)].map(() => {
       const g = new T.Group(); const body = mesh(new T.CylinderGeometry(.013, .013, .055, 10), std('#8a1810', { roughness: .5 }), 0, .04, 0);
       g.add(body, mesh(new T.CylinderGeometry(.0135, .0135, .016, 10), std('#a8832e', { metalness: .8, roughness: .3 }), 0, .008, 0)); g.body = body; this.shellG.add(g); return g;
@@ -326,9 +338,10 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
     g.k = ap(g.k, g.kt, 2.6); f.black = ap(f.black, f.blackT, 2.2); f.dead = ap(f.dead, f.deadT, 1.1);
     f.flash = Math.max(0, f.flash - dt * 5); f.shake = Math.max(0, f.shake - dt * 2.5); f.hit = Math.max(0, f.hit - dt * 2.2);
     f.red = Math.max(0, f.red - dt * .8); g.recoil = Math.max(0, g.recoil - dt * 5);
-    if (this.blink > 0) { this.blink -= dt; this.flk = Math.random() < .5 ? .15 : .7; }
+    if (this.lampOff) this.flk = .02; else if (this.blink > 0) { this.blink -= dt; this.flk = Math.random() < .5 ? .15 : .7; }
     else { this.flk = .93 + .07 * Math.sin(this.t * 17) * Math.sin(this.t * 5.3); if (Math.random() < dt * .22) this.blink = .06 + Math.random() * .3; }
     if (this.float && (this.float.t += dt) > 1.3) this.float = null;
+    this.tw = this.tw.filter(w => { w.t += dt; const k = Math.min(1, w.t / w.d); w.fn(k); if (k >= 1) w.res(); return k < 1; });
     this.twitch = Math.max(0, this.twitch - dt * 6); if (Math.random() < dt * .18) this.twitch = 1, this.twDir = Math.random() < .5 ? -1 : 1;
   }
   frame(now) {
@@ -346,22 +359,20 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
     this.rim.intensity = 2.2 + Math.sin(t * 1.3) * .4; this.redL.intensity = Math.random() < .02 ? .2 : 1.6; this.chains.forEach((c, i) => c.rotation.z = Math.sin(t * .4 + i * 2) * .04);
     this.animOpp(dt);
     // 총
-    this.setSaw(!!(v && v.sawed)); this.gunG.visible = !this.gun.hide && !this.shells; this.poseGun();
+    this.setSaw(!!(v && v.sawed)); this.gunG.visible = !this.gun.hide; this.poseGun();
     this.flashL.intensity = f.flash * 25; this.flashS.material.opacity = f.flash;
     // 촛불, 아이템, 탄
     this.candles.forEach((cd, p) => {
-      const n = v ? v.max : 0, hp = v ? v.hp[p] : 0, sp = p ? .055 : .065, blue = v && v.sudden[p]; let lit = 0;
+      const n = v ? v.max : 0, hp = v ? v.hp[p] : 0, sp = p ? .07 : .075, blue = v && v.sudden[p]; let lit = 0;
       cd.list.forEach((o, i) => {
         o.c.visible = i < n; o.c.position.x = (i - (n - 1) / 2) * sp; o.fl.position.x = o.c.position.x;
         const on = i < hp; o.fl.visible = o.c.visible && on; if (on) lit++;
-        const fl = 1 + Math.sin(t * 13 + i * 2.1) * .12 + (Math.random() - .5) * .1; o.fl.scale.set(.035 * fl, .06 * fl, 1);
+        const fl = 1 + Math.sin(t * 13 + i * 2.1) * .12 + (Math.random() - .5) * .1; o.fl.scale.set(.06 * fl, .1 * fl, 1);
         o.fl.material.color.set(blue ? '#5f9bff' : '#ffb050'); o.c.material = MAT.wax;
       });
-      cd.L.intensity = lit * (p ? .5 : .3) * this.flk; cd.L.color.set(blue ? '#4a7aff' : '#ff8a3a');
+      cd.L.intensity = lit * .7 * this.flk; cd.L.color.set(blue ? '#4a7aff' : '#ff8a3a');
     });
     this.syncItems();
-    this.shellG.visible = !!this.shells;
-    if (this.shells) { const n = this.shells.live + this.shells.blank; this.shellM.forEach((m, i) => { m.visible = i < n; m.position.set((i - (n - 1) / 2) * .07, 0, .05); m.body.material.color.set(i < this.shells.live ? '#8a1810' : '#26343c'); }); }
     this.floatG.visible = !!this.float;
     if (this.float) {
       const fl = this.float; if (this.floatG.userData.k !== fl.k + fl.p) { this.floatG.children.filter(c => c !== this.floatL).forEach(c => this.floatG.remove(c)); const m = itemMesh(fl.k); m.scale.setScalar(1.6); this.floatG.add(m); this.floatG.userData.k = fl.k + fl.p; }
@@ -400,7 +411,8 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
   poseGun() {
     const g = this.gun, G = this.gunG, k = g.k < .5 ? 2 * g.k * g.k : 1 - (-2 * g.k + 2) ** 2 / 2;
     const rest = V(-.08, .03, -.04); let pos = rest, q = this.restQ;
-    if (g.pose && k > 0) {
+    if (g.pose === 2) { this.dummy.position.set(0, .34, .3); this.dummy.rotation.set(-.2, Math.PI / 2, .3); pos = rest.clone().lerp(this.dummy.position, k); q = this.restQ.clone().slerp(this.dummy.quaternion, k); }
+    else if (g.pose && k > 0) {
       const cp = this.cam.position, cd = this.cam.getWorldDirection(V(0, 0, 0)), head = this.head.getWorldPosition(V(0, 0, 0));
       let p, tg;
       if (g.pose === 1 && g.by === 0) { p = V(.1, .48, .45); tg = head; }
@@ -412,6 +424,48 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
     }
     G.position.copy(pos); G.quaternion.copy(q);
     if (g.recoil) { G.translateZ(-g.recoil * .06); G.rotateX(-g.recoil * .25); }
+  }
+  tween(d, fn) { return new Promise(res => this.tw.push({ t: 0, d, fn, res })); }
+  async rack() { sfx.rack(); await this.tween(.13, k => this.pump.position.z = .19 - .07 * k); await this.tween(.13, k => this.pump.position.z = .12 + .07 * k); }
+  // 장전: 탄을 늘어놓고 → 불이 꺼진 사이 섞고 → 한 발씩 밀어 넣고 → 펌프
+  async loadShells(live, blank) {
+    const n = live + blank, M = this.shellM, xs = i => (i - (n - 1) / 2) * .085;
+    this.shellG.visible = true;
+    M.forEach((m, i) => { m.visible = i < n; m.scale.setScalar(1.6); m.rotation.set(0, 0, 0); m.position.set(xs(i), .4, .14); m.body.material.color.set(i < live ? '#a81c10' : '#2c4250'); });
+    await this.tween(.7, k => M.forEach((m, i) => { if (i < n) { const kk = Math.min(1, Math.max(0, k * 1.8 - i * .1)); m.position.y = .4 * (1 - kk * kk); } }));
+    sfx.shells(n); await wait(1200);
+    this.lampOff = true; sfx.whisper(); await wait(550);
+    const ord = [...Array(n).keys()].sort(() => Math.random() - .5);
+    ord.forEach((o, i) => { M[o].position.x = xs(i); M[o].body.material.color.set('#2a2420'); M[o].rotation.y = Math.random() * 6; });
+    this.lampOff = false; await wait(300);
+    this.gun.pose = 2; this.gun.kt = 1; await wait(500);
+    for (let i = 0; i < n; i++) {
+      const m = M[ord[i]], from = m.position.clone(), to = this.gunG.localToWorld(V(0, -.03, .02));
+      await this.tween(.19, k => { m.position.lerpVectors(from, to, ease(k)); m.position.y += Math.sin(k * Math.PI) * .1; m.rotation.x = k * 1.5; m.scale.setScalar(1.6 - k * .9); });
+      m.visible = false; sfx.insert(); this.gun.recoil = .25; await wait(60);
+    }
+    await wait(150); await this.rack(); await wait(250);
+    this.gun.kt = 0; await wait(450); this.gun.pose = 0; this.shellG.visible = false;
+  }
+  // 아이템: 테이블 해치에서 상자가 올라와 열리고, 하나씩 꺼내 자리에 놓는다
+  async dealItems(old, neu) {
+    this.dealing = true;
+    await Promise.all([0, 1].map(async p => {
+      const add = neu[p].slice(old[p].length); if (!add.length) return;
+      const b = this.boxes[p], zc = p ? -.22 : .14, sc = p ? 1.7 : 2.1;
+      b.visible = true; b.position.set(0, -.12, zc); b.lid.rotation.x = 0; b.inner.intensity = 0;
+      sfx.drop(); await this.tween(.4, k => b.position.y = -.12 + .12 * ease(k));
+      sfx.creak(); await this.tween(.3, k => { b.lid.rotation.x = (p ? 1 : -1) * 1.9 * ease(k); b.inner.intensity = k * 1.2; });
+      for (let j = 0; j < add.length; j++) {
+        const m = itemMesh(add[j]), [x, z] = (p ? OSL : PSL)[old[p].length + j], from = V(0, .03, zc), to = V(x, 0, z);
+        m.scale.setScalar(sc); this.flyG.add(m); sfx.item();
+        await this.tween(.45, k => { m.position.lerpVectors(from, to, ease(k)); m.position.y += Math.sin(k * Math.PI) * .2; m.rotation.y = (p ? Math.PI : 0) + (1 - k) * 5; });
+        sfx.drop(); await wait(70);
+      }
+      await this.tween(.22, k => { b.lid.rotation.x = (p ? 1 : -1) * 1.9 * (1 - k); b.inner.intensity = 1.2 * (1 - k); });
+      await this.tween(.35, k => b.position.y = -.12 * ease(k)); b.visible = false;
+    }));
+    this.v = { ...this.v, items: neu }; this.flyG.clear(); this.dealing = false;
   }
   syncItems() {
     const v = this.v, key = v ? JSON.stringify(v.items) : '';

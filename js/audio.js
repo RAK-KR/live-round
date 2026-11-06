@@ -58,6 +58,8 @@ export const sfx = {
   saw() { for (let i = 0; i < 6; i++) noise(0.07, { d: i * 0.08, type: 'bandpass', f: 1400 + i * 90, q: 4, g: 0.4 }); },
   phone() { tone(440, 0.3, { type: 'square', g: 0.03 }); tone(480, 0.3, { type: 'square', g: 0.03 }); tone(440, 0.3, { d: 0.5, type: 'square', g: 0.03 }); },
   cuffs() { [0, 0.1, 0.2].forEach(d => tone(1800 + d * 1500, 0.05, { d, type: 'triangle', g: 0.1 })); },
+  insert() { noise(.05, { type: 'bandpass', f: 1400, q: 3, g: .55 }); tone(260, .05, { type: 'square', g: .05, f2: 180 }); },
+  creak() { tone(140, .35, { type: 'sawtooth', g: .05, f2: 90, a: .05 }); noise(.3, { type: 'bandpass', f: 500, q: 6, g: .15 }); },
   whisper() { noise(0.8, { type: 'bandpass', f: 900, f2: 2400, q: 9, g: 0.25, a: 0.2 }); },
   stinger() { [0, 7, 13].forEach(dt => tone(300 + dt, 1.8, { type: 'sawtooth', g: 0.07, f2: 60, a: 0.05 })); noise(1.5, { f: 300, f2: 60, g: 0.3, a: 0.05 }); },
 };

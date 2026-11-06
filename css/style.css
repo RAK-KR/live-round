@@ -20,10 +20,10 @@ button:disabled { opacity: .28; cursor: default; }
 }
 #topbar button { pointer-events: auto; padding: 4px 11px; font-family: 'Special Elite', monospace; }
 #log {
-  position: absolute; top: calc(42px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: min(92vw, 520px);
-  text-align: center; font-size: 14px; line-height: 1.55; text-shadow: 0 0 6px #000, 0 0 3px #000, 0 0 1px #000;
+  position: absolute; top: calc(70px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: min(94vw, 560px);
+  text-align: center; font-size: 16px; font-weight: 700; line-height: 1.6; text-shadow: 0 0 8px #000, 0 0 4px #000, 0 0 2px #000, 0 0 1px #000;
 }
-.ln { opacity: .4; animation: in .45s ease-out; }
+.ln { opacity: .45; animation: in .45s ease-out; color: #e8e0d2; }
 .ln:last-child { opacity: 1; }
 .ln.sys { color: #958b7e; }
 .ln.hit { color: #ff4636; }
@@ -86,8 +86,20 @@ button:disabled { opacity: .28; cursor: default; }
 .scroll p { margin-bottom: 10px; }
 .scroll b { color: #e6dac8; }
 
-@media (min-aspect-ratio: 1/1) {
-  #log { left: 28px; top: 42%; transform: none; width: min(30vw, 380px); text-align: left; font-size: 15px; }
+@media (min-aspect-ratio: 6/5) {
+  #log { top: auto; bottom: calc(118px + env(safe-area-inset-bottom)); width: min(72vw, 900px); font-size: 21px; }
+  #topbar { font-size: 15px; }
+  #hp { font-size: 16px; } #hp b { width: 16px; height: 22px; }
 }
 
 #hover { position: fixed; pointer-events: none; padding: 4px 9px; background: rgba(0, 0, 0, .85); border-left: 2px solid #8e1a12; font-size: 13px; letter-spacing: .1em; color: #e6dac8; z-index: 5; }
+
+#hp {
+  position: absolute; top: calc(38px + env(safe-area-inset-top)); left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 4px;
+  font-size: 13px; letter-spacing: .1em; color: #b8ad9e; text-shadow: 0 0 4px #000;
+}
+#hp span { margin: 0 6px; font-weight: 700; }
+#hp em { width: 26px; }
+#hp b { width: 11px; height: 16px; border: 1px solid #5a2a1c; background: rgba(0, 0, 0, .6); }
+#hp b.on { background: #ffb347; border-color: #ffcf80; box-shadow: 0 0 8px rgba(255, 150, 50, .8); }
+#hp b.sd { background: #5f9bff; border-color: #a8c8ff; box-shadow: 0 0 8px rgba(80, 140, 255, .8); }
