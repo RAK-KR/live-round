@@ -27,7 +27,7 @@ for (let n = 0; n < 4000; n++) {
   while (!g.over) {
     if (++steps > 2000) fail('infinite loop');
     const me = g.turn, a = decide(g, me, L[me]);
-    const ok = a.type === 'item' ? g.use(me, a.idx, a.steal ?? -1) : g.shoot(me, a.target);
+    const ok = a.type === 'item' ? g.use(me, a.idx, a.steal ?? -1, a.who ?? -1) : g.shoot(me, a.target);
     if (!ok) fail('AI produced invalid action ' + JSON.stringify(a) + ' items=' + g.players[me].items);
     actions++; check();
   }
@@ -53,5 +53,24 @@ for (let n = 0; n < 4000; n++) {
   g.players[0].hp = 1; g.players[0].items = ['cigs'];
   g.use(0, 0); if (g.players[0].hp !== 1) fail('sudden death blocks heal');
 }
+// 3~4인 친구 대전 규칙
+const mw = [0, 0, 0, 0];
+for (let n = 0; n < 3000; n++) {
+  const N = 3 + (n % 2), g = new Game({ hp: 2 + (n % 5), items: 1 + n % 4, sudden: n % 3 === 0, multi: true, slots: 4 }, Math.random, N);
+  let steps = 0;
+  while (!g.over) {
+    if (++steps > 3000) fail('multi infinite loop');
+    const me = g.turn; if (!g.alive(me)) fail('dead player has turn');
+    const a = decide(g, me, LEVELS[lvls[(n + me) % 4]]);
+    const ok = a.type === 'item' ? g.use(me, a.idx, a.steal ?? -1, a.who ?? -1) : g.shoot(me, a.target);
+    if (!ok) fail('multi invalid action ' + JSON.stringify(a));
+    g.players.forEach(p => { if (p.items.length > 4) fail('multi slots'); if (p.hp < 0 || p.hp > p.max) fail('multi hp'); });
+    for (const e of g.flush()) if (e.t === 'die' && g.players[e.p].hp > 0) fail('die event alive');
+    if (!g.over && !g.shells.length) fail('multi empty chamber');
+  }
+  if (g.players.filter(p => p.hp > 0).length !== 1 || g.players[g.winner].hp <= 0) fail('multi winner');
+  mw[g.winner]++;
+}
+console.log(`OK multi 3000 games, winner seat dist ${mw.join('/')}`);
 console.log(`OK ${games} games, ${actions} actions, wins P0/P1 = ${wins.join('/')}`);
 console.log(`nightmare(P0) vs easy: ${vs.nightmare} wins / easy(P0) vs nightmare: ${vs.easy} wins (각 250판)`);

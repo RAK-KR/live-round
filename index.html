@@ -10,20 +10,22 @@
 </head>
 <body>
 <canvas id="scene"></canvas>
+<div id="labels"></div>
 <div id="hud" class="hidden">
   <div id="topbar"><span id="stageName"></span><span id="roundInfo"></span><button id="btnPause" aria-label="일시 정지">II</button></div>
   <div id="hp"></div>
   <div id="log"></div>
   <div id="known"></div>
   <div id="itemTip" class="hidden">
-    <b id="tipName"></b><p id="tipDesc"></p>
+    <b id="tipName"></b><p id="tipDesc"></p><div id="tipTargets" class="row"></div>
     <div class="row"><button id="tipUse">사용</button><button id="tipCancel">닫기</button></div>
   </div>
-  <div id="actions"><button id="btnShootOpp">상대를 쏜다</button><button id="btnShootSelf">나를 쏜다</button></div>
+  <div id="actions"></div>
 </div>
 <div id="hover" class="hidden"></div>
 <div id="banner"></div>
 <div id="screen"></div>
+<script src="js/lib/peerjs.min.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

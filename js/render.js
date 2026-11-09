@@ -37,6 +37,7 @@ function faceGeo(F) {
 }
 const front = (x, y) => V(x, y, Math.sqrt(Math.max(0, 1 - x * x - y * y)));
 const uvPx = (x, y, w, h) => { const n = front(x, y); let u = Math.atan2(n.z, -n.x) / (Math.PI * 2); if (u < 0) u += 1; return [u * w, Math.acos(n.y) / Math.PI * h]; };
+const rotY = (x, z, a) => [x * Math.cos(a) + z * Math.sin(a), -x * Math.sin(a) + z * Math.cos(a)];
 const V = (x, y, z) => new T.Vector3(x, y, z), UP = V(0, 1, 0);
 const std = (c, o = {}) => new T.MeshStandardMaterial({ color: c, roughness: .88, metalness: 0, ...o });
 const mesh = (geo, mat, x = 0, y = 0, z = 0, sh = true) => { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = sh; return m; };
@@ -105,7 +106,7 @@ function itemMesh(k) {
 export class Scene {
   constructor(cv) {
     this.cv = cv; this.t = 0; this.v = null; this.sel = -1; this.steal = false; this.dis = null; this.shells = null; this.float = null;
-    this.blink = 0; this.flk = 1; this.tw = []; this.look = 0; this.crack = 0; this._crack = -1; this._ik = ''; this.twitch = 0;
+    this.blink = 0; this.flk = 1; this.tw = []; this.look = 0; this._ik = ''; this.figs = []; this.n = 2; this.multi = false; this.ang = [0, Math.PI]; this.lab = document.getElementById('labels'); this.tags = []; this.turn = -1;
     this.r = new T.WebGLRenderer({ canvas: cv, antialias: false, powerPreference: 'high-performance' });
     this.r.shadowMap.enabled = true; this.r.shadowMap.type = T.PCFShadowMap; this.r.setPixelRatio(1);
     makeTextures();
@@ -118,16 +119,16 @@ export class Scene {
     };
     const S = this.S = new T.Scene(); S.fog = new T.FogExp2('#000000', .26); S.background = new T.Color('#020101');
     this.cam = new T.PerspectiveCamera(60, 1, .02, 30); S.add(this.cam);
-    this.buildRoom(); this.buildOpp(); this.buildGun(); this.buildTableStuff(); this.buildPost();
+    this.buildRoom(); this.buildGun(); this.buildTableStuff(); this.buildPost();
     this.reset(); this.setOpp({ name: 'x', mask: 'host', mc: '#c9ae74', ec: '#ff1414' });
     this.ray = new T.Raycaster();
     this.resize(); addEventListener('resize', () => this.resize());
     const loop = ts => { this.frame(ts / 1000); requestAnimationFrame(loop); }; requestAnimationFrame(loop);
   }
   reset() {
-    this.fx = { shake: 0, flash: 0, red: 0, black: 0, blackT: 0, hit: 0, dead: 0, deadT: 0 };
-    this.gun = { pose: 0, by: 0, k: 0, kt: 0, recoil: 0, hide: false };
-    this.crack = 0; this.look = 0; this.shells = null; this.float = null; this.sel = -1; this.steal = false;
+    this.fx = { shake: 0, flash: 0, red: 0, black: 0, blackT: 0 };
+    this.gun = { pose: 0, by: 0, target: 0, k: 0, kt: 0, recoil: 0, hide: false };
+    (this.figs || []).forEach(f => { f.hit = f.dead = f.deadT = 0; f.crack = 0; }); this.look = 0; this.shells = null; this.float = null; this.sel = -1; this.steal = false;
   }
   buildRoom() {
     const S = this.S;
@@ -139,16 +140,17 @@ export class Scene {
     this.chains = [-1, 1].map(s => { const c = new T.Group(); c.position.set(s * 1.35, 2.7, -1.45); for (let i = 0; i < 16; i++) { const l = mesh(new T.TorusGeometry(.03, .008, 4, 8), rust, 0, -i * .05, 0); l.rotation.y = i % 2 * Math.PI / 2; c.add(l); } const hk = mesh(new T.TorusGeometry(.06, .01, 4, 10, Math.PI * 1.4), rust, .03, -.85, 0); c.add(hk); S.add(c); return c; });
     [[-1.75, -.52, -1.9, .55], [-1.72, .02, -1.92, .5], [-1.2, -.6, -2.2, .4], [1.8, -.55, -1.7, .5]].forEach(([x, y, z, k]) => { const b = mesh(new T.BoxGeometry(k, k, k), MAT.wood, x, y, z); b.rotation.y = x * .7; S.add(b); });
     [[0, 2.25, -2.5, 4.8, 0], [1.95, .8, -2.5, 3, 1]].forEach(([x, y, z, l, v]) => { const pp = mesh(new T.CylinderGeometry(.04, .04, l, 8), rust, x, y, z); if (!v) pp.rotation.z = Math.PI / 2; S.add(pp); });
-    const chair = new T.Group(); chair.position.set(1.55, -.3, -.4); chair.rotation.set(0, -.9, 1.35); chair.add(mesh(new T.BoxGeometry(.45, .04, .45), MAT.wood), mesh(new T.BoxGeometry(.45, .5, .04), MAT.wood, 0, .27, -.21)); S.add(chair);
+    const chair = this.chair = new T.Group(); chair.position.set(1.55, -.3, -.4); chair.rotation.set(0, -.9, 1.35); chair.add(mesh(new T.BoxGeometry(.45, .04, .45), MAT.wood), mesh(new T.BoxGeometry(.45, .5, .04), MAT.wood, 0, .27, -.21)); S.add(chair);
     const red = new T.PointLight('#ff1a0a', 1.6, 2.6, 1.3); red.position.set(1.9, 1.4, -2.2); S.add(red); this.redL = red;
     const sick = new T.PointLight('#7aa070', .7, 2.2, 1.4); sick.position.set(-1.9, .9, -1.6); S.add(sick); this.sickL = sick;
     const ceil = mesh(new T.PlaneGeometry(8, 8), std('#0a0908'), 0, 2.7, 0); ceil.rotation.x = Math.PI / 2; S.add(ceil);
     S.add(mesh(new T.BoxGeometry(.7, 1.6, .05), std('#050404'), -1.6, 0, -2.97)); // 어두운 문틈
     // 테이블
-    const top = mesh(new T.BoxGeometry(1.9, .06, 1.7), [MAT.wood, MAT.wood, std('#fff', { map: TEX.felt }), MAT.wood, MAT.wood, MAT.wood], 0, -.03, 0); S.add(top);
-    [[0, .86, 1.94, .06], [0, -.86, 1.94, .06]].forEach(([x, z, w, d]) => S.add(mesh(new T.BoxGeometry(w, .035, d), MAT.wood, x, .005, z)));
-    [-.96, .96].forEach(x => S.add(mesh(new T.BoxGeometry(.06, .035, 1.7), MAT.wood, x, .005, 0)));
-    S.add(mesh(new T.BoxGeometry(1.7, .75, 1.5), std('#0b0806'), 0, -.43, 0));
+    const TG = this.tableG = new T.Group(); S.add(TG);
+    const top = mesh(new T.BoxGeometry(1.9, .06, 1.7), [MAT.wood, MAT.wood, std('#fff', { map: TEX.felt }), MAT.wood, MAT.wood, MAT.wood], 0, -.03, 0); TG.add(top);
+    [[0, .86, 1.94, .06], [0, -.86, 1.94, .06]].forEach(([x, z, w, d]) => TG.add(mesh(new T.BoxGeometry(w, .035, d), MAT.wood, x, .005, z)));
+    [-.96, .96].forEach(x => TG.add(mesh(new T.BoxGeometry(.06, .035, 1.7), MAT.wood, x, .005, 0)));
+    TG.add(mesh(new T.BoxGeometry(1.7, .75, 1.5), std('#0b0806'), 0, -.43, 0));
     // 전구
     this.lamp = new T.Group(); this.lamp.position.set(0, 2.7, 0); S.add(this.lamp);
     this.lamp.add(mesh(new T.CylinderGeometry(.004, .004, .95, 4), MAT.dark, 0, -.47, 0, false));
@@ -161,22 +163,23 @@ export class Scene {
     this.rim = new T.PointLight('#a00c06', 2.2, 3.5, 1.2); this.rim.position.set(0, 1.5, -2.1); S.add(this.rim);
     S.add(new T.HemisphereLight('#1a1416', '#000000', .12));
   }
-  buildOpp() {
-    const o = this.oppG = new T.Group(); o.position.set(0, 0, -1.2); this.S.add(o);
-    const body = this.body = new T.Group(); o.add(body);
+  makeFig() {
+    const f = { hit: 0, dead: 0, deadT: 0, crack: 0, _crack: -1, twitch: 0, lean: 0, pupils: [] }; f.root = new T.Group(); this.S.add(f.root);
+    const o = f.g = new T.Group(); o.position.set(0, 0, -1.2); f.root.add(o);
+    const body = f.body = new T.Group(); o.add(body);
     const torso = mesh(new T.CylinderGeometry(.15, .3, 1.0, 10), MAT.cloth, 0, .4, 0); torso.rotation.x = .25; body.add(torso);
     const sh = mesh(new T.SphereGeometry(.3, 12, 8), MAT.cloth, 0, .84, .1); sh.scale.set(1.55, .42, .8); body.add(sh);
     body.add(mesh(new T.CylinderGeometry(.035, .05, .26, 6), MAT.skin, 0, .98, .2)).rotation.x = .5;
-    const head = this.head = new T.Group(); head.position.set(0, 1.12, .3); body.add(head);
+    const head = f.head = new T.Group(); head.position.set(0, 1.12, .3); body.add(head);
     const hood = mesh(new T.SphereGeometry(.27, 20, 16, Math.PI / 2 + .95, Math.PI * 2 - 1.9), std('#0b0908', { roughness: 1, side: T.DoubleSide }), 0, .02, -.02);
     hood.scale.set(1.12, 1.3, 1.05); head.add(hood);
-    this.maskTex = ctex(512, 256, 1, () => { });
-    this.faceMat = std('#fff', { map: this.maskTex, vertexColors: true, roughness: .5 });
-    this.face = mesh(new T.SphereGeometry(1, 8, 6), this.faceMat, 0, -.02, .03); this.face.scale.set(.175, .2, .16); head.add(this.face);
-    this.feats = new T.Group(); this.face.add(this.feats);
-    this.crown = new T.Group(); for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2, c = mesh(new T.ConeGeometry(.016, .08 + (i % 2) * .06, 5), std('#6b5426', { metalness: .6, roughness: .4 }), Math.cos(a) * .17, .3, Math.sin(a) * .15 - .03); this.crown.add(c); } head.add(this.crown);
+    f.maskTex = ctex(512, 256, 1, () => { });
+    f.faceMat = std('#fff', { map: f.maskTex, vertexColors: true, roughness: .5 });
+    f.face = mesh(new T.SphereGeometry(1, 8, 6), f.faceMat, 0, -.02, .03); f.face.scale.set(.175, .2, .16); head.add(f.face);
+    f.feats = new T.Group(); f.face.add(f.feats);
+    f.crown = new T.Group(); for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2, c = mesh(new T.ConeGeometry(.016, .08 + (i % 2) * .06, 5), std('#6b5426', { metalness: .6, roughness: .4 }), Math.cos(a) * .17, .3, Math.sin(a) * .15 - .03); f.crown.add(c); } head.add(f.crown);
     const nail = std('#1a120c', { roughness: .4 });
-    this.arms = [-1, 1].map(s => {
+    f.arms = [-1, 1].map(s => {
       const up = mesh(new T.CylinderGeometry(1, 1, 1, 6), MAT.cloth), fo = mesh(new T.CylinderGeometry(1, .7, 1, 6), MAT.cloth), el = mesh(new T.SphereGeometry(.036, 6, 5), MAT.cloth);
       const hand = new T.Group(); hand.add(mesh(new T.BoxGeometry(.06, .018, .075), MAT.skin, 0, .01, 0));
       const fingers = [0, 1, 2, 3].map(i => {
@@ -189,8 +192,9 @@ export class Scene {
       });
       body.add(up, fo, el, hand); return { s, up, fo, el, hand, fingers, w: V(s * .3, .03, .46) };
     });
-    this.cuffO = new T.Group(); [-1, 1].forEach(s => { const c = mesh(new T.TorusGeometry(.035, .007, 6, 14), MAT.metal, s * .3, .04, .4); c.rotation.x = Math.PI / 2; this.cuffO.add(c); });
-    this.cuffO.add(mesh(new T.BoxGeometry(.52, .006, .006), MAT.metal, 0, .035, .4)); body.add(this.cuffO);
+    f.cuffO = new T.Group(); [-1, 1].forEach(s => { const c = mesh(new T.TorusGeometry(.035, .007, 6, 14), MAT.metal, s * .3, .04, .4); c.rotation.x = Math.PI / 2; f.cuffO.add(c); });
+    f.cuffO.add(mesh(new T.BoxGeometry(.52, .006, .006), MAT.metal, 0, .035, .4)); body.add(f.cuffO);
+    this.figs.push(f); return f;
   }
   setSeg(m, a, b, r) { const d = b.clone().sub(a); m.position.copy(a).add(b).multiplyScalar(.5); m.scale.set(r, d.length(), r); m.quaternion.setFromUnitVectors(UP, d.normalize()); }
   buildGun() {
@@ -216,7 +220,7 @@ export class Scene {
     const S = this.S;
     this.items = new T.Group(); S.add(this.items);
     this.ring = mesh(new T.RingGeometry(.1, .115, 24), new T.MeshBasicMaterial({ color: '#ff2a18', transparent: true }), 0, .003, 0, false); this.ring.rotation.x = -Math.PI / 2; S.add(this.ring);
-    this.candles = [0, 1].map(p => {
+    this.candles = [0, 1, 2, 3].map(p => {
       const grp = new T.Group(); S.add(grp); const list = [];
       for (let i = 0; i < 6; i++) {
         const h = .085 + ((i * 7) % 5) * .012, c = mesh(new T.CylinderGeometry(.019, .021, h, 10), MAT.wax, 0, h / 2, 0); grp.add(c);
@@ -224,16 +228,16 @@ export class Scene {
         fl.position.set(0, h + .03, 0); c.parent.add(fl);
         list.push({ c, fl, h });
       }
-      const L = new T.PointLight('#ff8a3a', 0, 2, 1.2); L.position.set(0, .2, p ? .1 : -.05); grp.add(L);
-      grp.position.set(0, 0, p ? -.46 : .3); return { grp, list, L };
+      const L = new T.PointLight('#ff8a3a', 0, 2, 1.2); L.position.set(0, .2, -.05); grp.add(L);
+      return { grp, list, L };
     });
     this.flyG = new T.Group(); S.add(this.flyG);
-    this.boxes = [0, 1].map(p => {
+    this.boxes = [0, 1, 2, 3].map(p => {
       const b = new T.Group(); b.visible = false; S.add(b);
       const wd = std('#3a2414', { map: TEX.wood }), iron = std('#2a2622', { metalness: .6, roughness: .6 });
       b.add(mesh(new T.BoxGeometry(.3, .1, .18), wd, 0, -.05, 0), mesh(new T.BoxGeometry(.31, .012, .19), iron, 0, -.02, 0));
-      b.lid = new T.Group(); b.lid.position.set(0, 0, p ? .09 : -.09); b.add(b.lid);
-      b.lid.add(mesh(new T.BoxGeometry(.31, .02, .19), wd, 0, .01, p ? -.095 : .095));
+      b.lid = new T.Group(); b.lid.position.set(0, 0, -.09); b.add(b.lid);
+      b.lid.add(mesh(new T.BoxGeometry(.31, .02, .19), wd, 0, .01, .095));
       const inner = new T.PointLight('#ffcf9a', 0, .6, 1.5); inner.position.set(0, .05, 0); b.add(inner); b.inner = inner;
       return b;
     });
@@ -275,56 +279,76 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
     this.lw = Math.ceil(w / px); this.lh = Math.ceil(h / px);
     this.r.setSize(this.lw, this.lh, false); this.rt.setSize(this.lw, this.lh); this.pu.res.value.set(this.lw, this.lh);
     const a = this.cam.aspect = w / h;
-    if (a >= 1.2) { this.cam.fov = 56; this.camBase = V(0, 1.16, 1.62); this.camTgt = V(0, .4, -.3); }
+    if (this.multi) { this.cam.fov = a >= 1.2 ? 58 : 72; const tv = Math.tan(this.cam.fov * Math.PI / 360); if (a >= 1.2) { this.camBase = V(0, 2.3, 2.3); this.camTgt = V(0, .1, -.12); } else { this.cam.fov = 78; const tw = Math.tan(39 * Math.PI / 180); this.camTgt = V(0, .25, -.12); this.camBase = this.camTgt.clone().addScaledVector(V(0, .58, .81).normalize(), Math.max(2.6, 1.1 / (tw * a))); } }
+    else if (a >= 1.2) { this.cam.fov = 56; this.camBase = V(0, 1.16, 1.62); this.camTgt = V(0, .4, -.3); }
     else {
       this.cam.fov = 72; const tv = Math.tan(this.cam.fov * Math.PI / 360), dist = Math.max(1.9, .78 / (tv * a));
       this.camTgt = V(0, .4, -.28); this.camBase = this.camTgt.clone().addScaledVector(V(0, .6, .8).normalize(), dist);
     }
     this.cam.updateProjectionMatrix();
   }
-  setOpp(s) {
-    this.opp = { ...s, seed: [...s.name].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) };
-    const F = this.F = FACES[s.mask] || FACES.plain, r = mul(this.opp.seed);
-    this._crack = -1; this.crown.visible = s.mask === 'host';
-    this.face.geometry.dispose(); this.face.geometry = faceGeo(F);
-    this.feats.clear(); this.pupils = [];
+  setOpp(s) { this.setTable(2, false, [s]); }
+  setTable(n, multi, defs) {
+    this.n = n; this.multi = multi; this.ang = n === 2 ? [0, Math.PI] : n === 3 ? [0, -Math.PI / 2, Math.PI / 2] : [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+    while (this.figs.length < n - 1) this.makeFig();
+    this.figs.forEach((f, i) => { f.root.visible = i < n - 1; if (i < n - 1) { f.seat = i + 1; f.root.rotation.y = this.ang[i + 1] + Math.PI; this.setFig(f, defs[i]); } else f.seat = -1; });
+    this.chair.visible = n === 2; this.chains.forEach(c => c.visible = !multi);
+    this.tableG.scale.set(multi ? 1.37 : 1, 1, multi ? 1.53 : 1); this.figs.forEach(f => f.g.position.z = multi ? -1.65 : -1.2);
+    this.lab.innerHTML = ''; this.tags = [];
+    if (multi) this.figs.forEach((f, i) => { if (i < n - 1) { const d = document.createElement('div'); d.className = 'tag'; d.textContent = defs[i].label || ''; this.lab.appendChild(d); this.tags.push([f, d]); } });
+    this._ik = ''; this.resize();
+  }
+  fig(i) { return this.figs.find(f => f.seat === i); }
+  hitSeat(i, d) { const f = this.fig(i); if (f) { f.hit = 1; f.crack += d; } }
+  killSeat(i, on = true) { const f = this.fig(i); if (f) f.deadT = on ? 1 : 0; }
+  slot(p, i) {
+    if (!this.multi) return p ? OSL[i] : PSL[i];
+    const [x, z] = [[-.6, .9], [-.36, .9], [.36, .9], [.6, .9]][i] || [0, .9]; return rotY(x, z, this.ang[p]);
+  }
+  itemScale(p) { return this.multi ? (p ? 1.85 : 2.2) : p ? 1.7 : 2.1; }
+  setFig(f, s) {
+    f.opp = { ...s, seed: [...s.name].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) };
+    const F = f.F = FACES[s.mask] || FACES.plain, r = mul(f.opp.seed);
+    f._crack = -1; f.crack = 0; f.hit = f.dead = f.deadT = 0; f.crown.visible = s.mask === 'host';
+    f.face.geometry.dispose(); f.face.geometry = faceGeo(F);
+    f.feats.clear(); f.pupils = [];
     F.eyes.forEach(([x, y, , dep]) => {
       const p = jaw(front(x, y).multiplyScalar(1 - dep * .8));
       const pu = mesh(new T.SphereGeometry(.028, 6, 6), new T.MeshBasicMaterial({ color: s.ec }), p.x, p.y, p.z, false);
       const gl = new T.Sprite(new T.SpriteMaterial({ map: TEX.glow, color: s.ec, blending: T.AdditiveBlending, depthWrite: false })); gl.scale.set(.35, .35, 1); pu.add(gl);
-      this.feats.add(pu); this.pupils.push(pu);
+      f.feats.add(pu); f.pupils.push(pu);
     });
     const bone = std('#c2b48e', { roughness: .45 }), thread = std('#1a0d07');
     if (F.mouth === 'grin') for (let k = 0; k < 22; k++) {
       if (r() < .15) continue; const x = -.56 + k * (1.12 / 21), y = mouthY(x, 'grin'), top = k % 2;
       const p = jaw(front(x, y + (top ? .03 : -.03)).multiplyScalar(.93));
-      const t = mesh(new T.BoxGeometry(.04, .07 + r() * .03, .03), bone, p.x, p.y, p.z, false); t.rotation.z = (r() - .5) * .4; this.feats.add(t);
+      const t = mesh(new T.BoxGeometry(.04, .07 + r() * .03, .03), bone, p.x, p.y, p.z, false); t.rotation.z = (r() - .5) * .4; f.feats.add(t);
     }
     if (F.mouth === 'stitch') for (let x = -.24; x <= .25; x += .08) [-1, 1].forEach(sg => {
-      const p = jaw(front(x, -.56).multiplyScalar(1.0)); const t = mesh(new T.BoxGeometry(.018, .16, .02), thread, p.x, p.y, p.z, false); t.rotation.z = sg * .6; this.feats.add(t);
+      const p = jaw(front(x, -.56).multiplyScalar(1.0)); const t = mesh(new T.BoxGeometry(.018, .16, .02), thread, p.x, p.y, p.z, false); t.rotation.z = sg * .6; f.feats.add(t);
     });
   }
-  paintMask() {
-    const o = this.opp, g = this.maskTex.g, w = 512, h = 256, r = mul(o.seed), rc = mul(o.seed + 99);
+  paintMask(f) {
+    const o = f.opp, g = f.maskTex.g, w = 512, h = 256, r = mul(o.seed), rc = mul(o.seed + 99);
     g.fillStyle = o.mc; g.fillRect(0, 0, w, h); grain(g, w, h, 40, r);
     for (let i = 0; i < 60; i++) blob(g, r() * w, r() * h, 4 + r() * 20, 3 + r() * 12, `rgba(${30 + r() * 30},20,12,${.08 + r() * .12})`);
     const [cx] = uvPx(0, 0, w, h);
     const sg = g.createLinearGradient(cx - 90, 0, cx + 90, 0); sg.addColorStop(0, 'rgba(0,0,0,.6)'); sg.addColorStop(.25, 'rgba(0,0,0,0)'); sg.addColorStop(.75, 'rgba(0,0,0,0)'); sg.addColorStop(1, 'rgba(0,0,0,.6)');
     g.fillStyle = sg; g.fillRect(0, 0, w, h);
-    this.F.eyes.forEach(([x, y, rad]) => {
-      if (!o.weep && this.crack === 0) return;
+    f.F.eyes.forEach(([x, y, rad]) => {
+      if (!o.weep && f.crack === 0) return;
       const [px, py] = uvPx(x, y - rad * .7, w, h);
       g.fillStyle = 'rgba(75,3,1,.9)'; g.fillRect(px - 2, py, 4, 40 + r() * 40); g.fillRect(px + 3 + (r() - .5) * 4, py + 6, 2, 60 + r() * 30);
     });
     if (o.mask === 'host') { g.strokeStyle = 'rgba(190,150,60,.8)'; g.lineWidth = 2; g.beginPath(); const [a, b] = uvPx(0, .9, w, h), [c, d] = uvPx(0, .4, w, h); g.moveTo(a, b); g.lineTo(c, d); g.stroke(); }
-    const nc = Math.min(20, 4 + this.crack * 3);
+    const nc = Math.min(20, 4 + f.crack * 3);
     for (let i = 0; i < nc; i++) {
       let [x, y] = uvPx((rc() - .5) * 1.4, (rc() - .45) * 1.5, w, h), a = rc() * 7; g.beginPath(); g.moveTo(x, y);
       for (let k = 0; k < 7; k++) { a += (rc() - .5) * 1.5; x += Math.cos(a) * 9; y += Math.sin(a) * 9; g.lineTo(x, y); }
       g.strokeStyle = 'rgba(12,6,3,.9)'; g.lineWidth = 1.4; g.stroke();
     }
-    for (let i = 0; i < this.crack * 18; i++) { const [x, y] = uvPx((rc() - .5) * 1.3, (rc() - .5) * 1.4, w, h); blob(g, x, y, 1 + rc() * 4, 1 + rc() * 4, 'rgba(105,5,2,.9)'); }
-    this.maskTex.needsUpdate = true; this._crack = this.crack;
+    for (let i = 0; i < f.crack * 18; i++) { const [x, y] = uvPx((rc() - .5) * 1.3, (rc() - .5) * 1.4, w, h); blob(g, x, y, 1 + rc() * 4, 1 + rc() * 4, 'rgba(105,5,2,.9)'); }
+    f.maskTex.needsUpdate = true; f._crack = f.crack;
   }
   pick(cx, cy) {
     if (!this.v) return null;
@@ -335,19 +359,17 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
   }
   update(dt) {
     const f = this.fx, g = this.gun, ap = (v, t, r) => v < t ? Math.min(t, v + r * dt) : Math.max(t, v - r * dt);
-    g.k = ap(g.k, g.kt, 2.6); f.black = ap(f.black, f.blackT, 2.2); f.dead = ap(f.dead, f.deadT, 1.1);
-    f.flash = Math.max(0, f.flash - dt * 5); f.shake = Math.max(0, f.shake - dt * 2.5); f.hit = Math.max(0, f.hit - dt * 2.2);
+    g.k = ap(g.k, g.kt, 2.6); f.black = ap(f.black, f.blackT, 2.2);
+    f.flash = Math.max(0, f.flash - dt * 5); f.shake = Math.max(0, f.shake - dt * 2.5);
     f.red = Math.max(0, f.red - dt * .8); g.recoil = Math.max(0, g.recoil - dt * 5);
     if (this.lampOff) this.flk = .02; else if (this.blink > 0) { this.blink -= dt; this.flk = Math.random() < .5 ? .15 : .7; }
     else { this.flk = .93 + .07 * Math.sin(this.t * 17) * Math.sin(this.t * 5.3); if (Math.random() < dt * .22) this.blink = .06 + Math.random() * .3; }
     if (this.float && (this.float.t += dt) > 1.3) this.float = null;
     this.tw = this.tw.filter(w => { w.t += dt; const k = Math.min(1, w.t / w.d); w.fn(k); if (k >= 1) w.res(); return k < 1; });
-    this.twitch = Math.max(0, this.twitch - dt * 6); if (Math.random() < dt * .18) this.twitch = 1, this.twDir = Math.random() < .5 ? -1 : 1;
   }
   frame(now) {
     const dt = Math.min(.05, now - (this.last || now)); this.last = now; this.t += dt; this.update(dt);
     const t = this.t, f = this.fx, v = this.v;
-    if (this._crack !== this.crack) this.paintMask();
     // 카메라
     const sh = f.shake * .03;
     this.cam.position.copy(this.camBase).add(V(Math.sin(t * .5) * .012 + (Math.random() - .5) * sh, Math.sin(t * .7) * .008 + (Math.random() - .5) * sh, 0));
@@ -357,13 +379,15 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
     const bp = this.bulb.getWorldPosition(V(0, 0, 0)); this.spot.position.copy(bp); this.fill.position.copy(bp);
     this.spot.intensity = 22 * this.flk; this.fill.intensity = .5 * this.flk; this.bulb.material.color.setScalar(.35 + .65 * this.flk).multiply(new T.Color('#ffd9a0'));
     this.rim.intensity = 2.2 + Math.sin(t * 1.3) * .4; this.redL.intensity = Math.random() < .02 ? .2 : 1.6; this.chains.forEach((c, i) => c.rotation.z = Math.sin(t * .4 + i * 2) * .04);
-    this.animOpp(dt);
+    this.figs.forEach(o => o.root.visible && this.animFig(o, dt));
     // 총
     this.setSaw(!!(v && v.sawed)); this.gunG.visible = !this.gun.hide; this.poseGun();
     this.flashL.intensity = f.flash * 25; this.flashS.material.opacity = f.flash;
     // 촛불, 아이템, 탄
     this.candles.forEach((cd, p) => {
-      const n = v ? v.max : 0, hp = v ? v.hp[p] : 0, sp = p ? .07 : .075, blue = v && v.sudden[p]; let lit = 0;
+      const on = v && p < this.n, n = on ? v.max : 0, hp = on ? v.hp[p] : 0, sp = this.multi ? .08 : p ? .07 : .075, blue = on && v.sudden[p]; let lit = 0;
+      if (this.multi) { const [x, z] = rotY(0, 1.1, this.ang[p] || 0); cd.grp.position.set(x, 0, z); cd.grp.rotation.y = this.ang[p] || 0; }
+      else { cd.grp.position.set(0, 0, p ? -.46 : .3); cd.grp.rotation.y = 0; }
       cd.list.forEach((o, i) => {
         o.c.visible = i < n; o.c.position.x = (i - (n - 1) / 2) * sp; o.fl.position.x = o.c.position.x;
         const on = i < hp; o.fl.visible = o.c.visible && on; if (on) lit++;
@@ -378,47 +402,52 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
       const fl = this.float; if (this.floatG.userData.k !== fl.k + fl.p) { this.floatG.children.filter(c => c !== this.floatL).forEach(c => this.floatG.remove(c)); const m = itemMesh(fl.k); m.scale.setScalar(1.6); this.floatG.add(m); this.floatG.userData.k = fl.k + fl.p; }
       this.floatG.rotation.y = fl.t * 2; this.floatG.position.y = -.06 + fl.t * .03; this.floatG.scale.setScalar(Math.min(1, fl.t * 5) * Math.min(1, (1.3 - fl.t) * 4) + .001);
     } else this.floatG.userData.k = '';
-    this.cuffO.visible = !!(v && v.cuffed[1] === 2 && f.dead < .5); this.cuffP.visible = !!(v && v.cuffed[0] === 2);
+    this.cuffP.visible = !!(v && v.cuffed[0] === 2);
+    this.tags.forEach(([o, d]) => { const p = o.head.getWorldPosition(V(0, 0, 0)).add(V(0, .34, 0)).project(this.cam); d.style.left = (p.x * .5 + .5) * innerWidth + 'px'; d.style.top = (-p.y * .5 + .5) * innerHeight + 'px'; d.classList.toggle('turn', this.turn === o.seat); d.classList.toggle('dead', o.deadT > 0); });
     // 렌더
     this.pu.time.value = t; this.pu.red.value = f.red; this.pu.flash.value = f.flash * .8; this.pu.black.value = f.black;
     this.r.setRenderTarget(this.rt); this.r.render(this.S, this.cam); this.r.setRenderTarget(null); this.r.render(this.pS, this.pC);
   }
-  animOpp(dt) {
-    const t = this.t, f = this.fx, d = f.dead, br = Math.sin(t * 1.1), look = this.look;
-    this.lean = (this.lean || 0) + ((look ? .14 : 0) - (this.lean || 0)) * Math.min(1, dt * 2);
-    this.oppG.position.y = -d * .25;
-    this.body.rotation.x = br * .015 + this.lean - f.hit * .3 + d * .7; this.body.position.z = -f.hit * .1 + this.lean * .3;
-    const h = this.head;
-    h.rotation.x = .1 + look * .1 - f.hit * .7 + d * .6 + Math.sin(t * .29) * .04;
-    h.rotation.z = Math.sin(t * .19) * .28 + this.twitch * .45 * (this.twDir || 1) + f.hit * .3 * Math.sin(t * 40);
-    h.rotation.y = Math.sin(t * .23) * .1 + this.twitch * .2 * (this.twDir || 1);
-    const glow = ((.75 + .25 * Math.sin(t * 2.3)) * (1 + f.red * 2)) * (1 - d);
-    this.pupils.forEach(e => { e.visible = d < .9 && Math.random() > (this.blink > 0 ? .5 : .003); e.children[0].material.opacity = glow; });
-    const holdK = this.gun.by === 1 ? this.gun.k : 0, grip = this.muzzle.getWorldPosition(V(0, 0, 0)).lerp(this.gunG.position, .6);
-    this.arms.forEach(a => {
+  animFig(o, dt) {
+    const t = this.t, d = o.dead, br = Math.sin(t * 1.1 + o.seat), look = this.look;
+    o.hit = Math.max(0, o.hit - dt * 2.2); o.dead += Math.sign(o.deadT - o.dead) * Math.min(Math.abs(o.deadT - o.dead), dt * 1.1);
+    o.twitch = Math.max(0, o.twitch - dt * 6); if (Math.random() < dt * .18) o.twitch = 1, o.twDir = Math.random() < .5 ? -1 : 1;
+    if (o._crack !== o.crack) this.paintMask(o);
+    o.lean += ((look ? .14 : 0) - o.lean) * Math.min(1, dt * 2);
+    o.g.position.y = -d * .25;
+    o.body.rotation.x = br * .015 + o.lean - o.hit * .3 + d * .7; o.body.position.z = -o.hit * .1 + o.lean * .3;
+    const h = o.head;
+    h.rotation.x = .1 + look * .1 - o.hit * .7 + d * .6 + Math.sin(t * .29 + o.seat) * .04;
+    h.rotation.z = Math.sin(t * .19 + o.seat * 2) * .28 + o.twitch * .45 * (o.twDir || 1) + o.hit * .3 * Math.sin(t * 40);
+    h.rotation.y = Math.sin(t * .23 + o.seat) * .1 + o.twitch * .2 * (o.twDir || 1);
+    const glow = ((.75 + .25 * Math.sin(t * 2.3)) * (1 + this.fx.red * 2)) * (1 - d);
+    o.pupils.forEach(e => { e.visible = d < .9 && Math.random() > (this.blink > 0 ? .5 : .003); e.children[0].material.opacity = glow; });
+    const holdK = this.gun.by === o.seat ? this.gun.k : 0, grip = this.muzzle.getWorldPosition(V(0, 0, 0)).lerp(this.gunG.position, .6);
+    o.arms.forEach(a => {
       const sh = V(a.s * .4, .82, .14);
-      let w = a.w.clone(); w.y += Math.max(0, Math.sin(t * 2.6 + a.s)) * .004;
-      if (a.s > 0 && holdK > 0) w.lerp(this.body.worldToLocal(grip.clone()), holdK);
+      let w = a.w.clone(); w.y += Math.max(0, Math.sin(t * 2.6 + a.s + o.seat)) * .004;
+      if (a.s > 0 && holdK > 0) w.lerp(o.body.worldToLocal(grip.clone()), holdK);
       const el = V(a.s * (.66 - holdK * .2), .52 + holdK * .1, .2);
       this.setSeg(a.up, sh, el, .04); this.setSeg(a.fo, el, w.clone().lerp(el, .12), .032); a.el.position.copy(el);
       a.hand.position.copy(w); a.hand.rotation.set(0, -a.s * .25, 0);
       a.fingers.forEach((fg, i) => {
-        const tap = a.s > 0 && i === 2 ? Math.max(0, Math.sin(t * 7)) * .5 * (Math.sin(t * .5) > .4) : 0;
+        const tap = a.s > 0 && i === 2 ? Math.max(0, Math.sin(t * 7 + o.seat)) * .5 * (Math.sin(t * .5 + o.seat) > .4) : 0;
         fg.rotation.x = .15 - tap + holdK * .6; fg.rotation.y = (i - 1.5) * .12 * a.s; fg.j.rotation.x = .9 + holdK * .5 + Math.sin(t * .8 + i) * .05;
       });
     });
+    o.cuffO.visible = !!(this.v && this.v.cuffed[o.seat] === 2 && d < .5);
   }
   poseGun() {
-    const g = this.gun, G = this.gunG, k = g.k < .5 ? 2 * g.k * g.k : 1 - (-2 * g.k + 2) ** 2 / 2;
-    const rest = V(-.08, .03, -.04); let pos = rest, q = this.restQ;
+    const g = this.gun, G = this.gunG, k = ease(g.k), rest = V(-.08, .03, -.04); let pos = rest, q = this.restQ;
     if (g.pose === 2) { this.dummy.position.set(0, .34, .3); this.dummy.rotation.set(-.2, Math.PI / 2, .3); pos = rest.clone().lerp(this.dummy.position, k); q = this.restQ.clone().slerp(this.dummy.quaternion, k); }
-    else if (g.pose && k > 0) {
-      const cp = this.cam.position, cd = this.cam.getWorldDirection(V(0, 0, 0)), head = this.head.getWorldPosition(V(0, 0, 0));
+    else if (g.pose && k > 0 && (g.by === 0 || this.fig(g.by))) {
+      const cp = this.cam.position, cd = this.cam.getWorldDirection(V(0, 0, 0)), b = g.by, t = g.target, a = this.ang[b] || 0;
+      const hd = i => i === 0 ? cp.clone() : this.fig(i).head.getWorldPosition(V(0, 0, 0)), loc = (x, y, z) => { const [wx, wz] = rotY(x, z, a); return V(wx, y, wz); };
       let p, tg;
-      if (g.pose === 1 && g.by === 0) { p = V(.1, .48, .45); tg = head; }
-      else if (g.pose === 1) { p = head.clone().add(V(.55, -.08, .2)); tg = head; }
-      else if (g.by === 0) { p = cp.clone().addScaledVector(cd, .82).add(V(.02, -.06, 0)); tg = cp; }
-      else { p = V(.05, .72, -.45); tg = cp; }
+      if (b === 0 && t === 0) { p = cp.clone().addScaledVector(cd, .82).add(V(.02, -.06, 0)); tg = cp; }
+      else if (b === 0) { p = this.multi ? V(.1, .6, 1.0) : V(.1, .48, .45); tg = hd(t); }
+      else if (t === b) { p = hd(b).add(loc(-.55, -.08, -.2)); tg = hd(b); }
+      else { p = hd(b).add(loc(0, -.38, -.4)); tg = hd(t); }
       this.dummy.position.copy(p); this.dummy.lookAt(tg);
       pos = rest.clone().lerp(p, k); q = this.restQ.clone().slerp(this.dummy.quaternion, k);
     }
@@ -450,32 +479,35 @@ gl_FragColor=vec4(clamp(c,0.,1.),1.);}`,
   // 아이템: 테이블 해치에서 상자가 올라와 열리고, 하나씩 꺼내 자리에 놓는다
   async dealItems(old, neu) {
     this.dealing = true;
-    await Promise.all([0, 1].map(async p => {
+    await Promise.all(neu.map(async (_, p) => {
       const add = neu[p].slice(old[p].length); if (!add.length) return;
-      const b = this.boxes[p], zc = p ? -.22 : .14, sc = p ? 1.7 : 2.1;
-      b.visible = true; b.position.set(0, -.12, zc); b.lid.rotation.x = 0; b.inner.intensity = 0;
+      const b = this.boxes[p], a = this.multi ? this.ang[p] : p ? Math.PI : 0, [bx, bz] = this.multi ? rotY(0, .55, a) : [0, p ? -.22 : .14], sc = this.itemScale(p);
+      b.visible = true; b.rotation.y = a; b.position.set(bx, -.12, bz); b.lid.rotation.x = 0; b.inner.intensity = 0;
       sfx.drop(); await this.tween(.4, k => b.position.y = -.12 + .12 * ease(k));
-      sfx.creak(); await this.tween(.3, k => { b.lid.rotation.x = (p ? 1 : -1) * 1.9 * ease(k); b.inner.intensity = k * 1.2; });
+      sfx.creak(); await this.tween(.3, k => { b.lid.rotation.x = -1.9 * ease(k); b.inner.intensity = k * 1.2; });
       for (let j = 0; j < add.length; j++) {
-        const m = itemMesh(add[j]), [x, z] = (p ? OSL : PSL)[old[p].length + j], from = V(0, .03, zc), to = V(x, 0, z);
+        const m = itemMesh(add[j]), [x, z] = this.slot(p, old[p].length + j), from = V(bx, .03, bz), to = V(x, 0, z), ry = this.multi ? a : p ? Math.PI : 0;
         m.scale.setScalar(sc); this.flyG.add(m); sfx.item();
-        await this.tween(.45, k => { m.position.lerpVectors(from, to, ease(k)); m.position.y += Math.sin(k * Math.PI) * .2; m.rotation.y = (p ? Math.PI : 0) + (1 - k) * 5; });
+        await this.tween(.45, k => { m.position.lerpVectors(from, to, ease(k)); m.position.y += Math.sin(k * Math.PI) * .2; m.rotation.y = ry + (1 - k) * 5; });
         sfx.drop(); await wait(70);
       }
-      await this.tween(.22, k => { b.lid.rotation.x = (p ? 1 : -1) * 1.9 * (1 - k); b.inner.intensity = 1.2 * (1 - k); });
+      await this.tween(.22, k => { b.lid.rotation.x = -1.9 * (1 - k); b.inner.intensity = 1.2 * (1 - k); });
       await this.tween(.35, k => b.position.y = -.12 * ease(k)); b.visible = false;
     }));
     this.v = { ...this.v, items: neu }; this.flyG.clear(); this.dealing = false;
   }
   syncItems() {
-    const v = this.v, key = v ? JSON.stringify(v.items) : '';
+    const v = this.v, key = v ? JSON.stringify(v.items) + this.n + this.multi : '';
     if (key !== this._ik) {
       this._ik = key; this.items.clear();
-      if (v) [0, 1].forEach(p => v.items[p].forEach((k, i) => { const m = itemMesh(k), [x, z] = (p ? OSL : PSL)[i]; m.position.set(x, 0, z); m.scale.setScalar(p ? 1.7 : 2.1); m.rotation.y = p ? Math.PI : 0; m.userData = { p, i, k }; this.items.add(m); }));
+      if (v) v.items.forEach((list, p) => list.forEach((k, i) => {
+        const m = itemMesh(k), [x, z] = this.slot(p, i); m.position.set(x, 0, z); m.scale.setScalar(this.itemScale(p));
+        m.rotation.y = this.multi ? this.ang[p] : p ? Math.PI : 0; m.userData = { p, i, k }; this.items.add(m);
+      }));
     }
     let ring = null;
     this.items.children.forEach(m => {
-      const { p, i } = m.userData, s = p === 0 && i === this.sel, tgt = this.steal && p === 1 && m.userData.k !== 'adrenaline';
+      const { p, i } = m.userData, s = p === 0 && i === this.sel, tgt = this.steal && p !== 0 && m.userData.k !== 'adrenaline';
       m.position.y = s ? .03 + Math.sin(this.t * 3) * .006 : 0; if (s) { m.rotation.y += .02; ring = m; }
       if (tgt) m.position.y = .015 + Math.max(0, Math.sin(this.t * 6)) * .02;
     });

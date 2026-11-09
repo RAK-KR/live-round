@@ -1,7 +1,7 @@
-// 게임 규칙 (DOM 없음 — Node 테스트 가능)
+// 게임 규칙 (DOM 없음 — Node 테스트 가능). 2~4인 지원
 export const ITEMS = {
   magnifier: { name: '돋보기', desc: '현재 장전된 탄이 실탄인지 공포탄인지 확인합니다.' },
-  cuffs: { name: '수갑', desc: '상대에게 채워 상대의 다음 차례를 한 번 건너뛰게 합니다.' },
+  cuffs: { name: '수갑', desc: '상대에게 채워 그 상대의 다음 차례를 한 번 건너뛰게 합니다.' },
   saw: { name: '톱', desc: '총열을 잘라냅니다. 다음 한 발의 피해가 2배가 됩니다.' },
   beer: { name: '맥주', desc: '펌프를 당겨 현재 탄을 쏘지 않고 빼냅니다.' },
   cigs: { name: '담배', desc: '체력을 1 회복합니다.' },
@@ -14,11 +14,11 @@ const WEIGHT = { magnifier: 3, cuffs: 2, saw: 2.2, beer: 3, cigs: 3, adrenaline:
 export const SLOTS = 8;
 
 export class Game {
-  // cfg: { hp, items(로드당 지급 수), sudden(체력 2 이하 회복 불가) }
-  constructor(cfg, rng = Math.random) {
-    this.cfg = cfg; this.rng = rng;
-    this.players = [0, 1].map(() => ({ hp: cfg.hp, max: cfg.hp, items: [], cuffed: 0 }));
-    this.turn = 0; this.sawed = false; this.shells = []; this.known = [[], []];
+  // cfg: { hp, items(로드당 지급 수), sudden, multi(친구 대전 규칙), slots }
+  constructor(cfg, rng = Math.random, n = 2) {
+    this.cfg = cfg; this.rng = rng; this.n = n; this.multi = !!cfg.multi; this.slots = cfg.slots || SLOTS;
+    this.players = Array.from({ length: n }, () => ({ hp: cfg.hp, max: cfg.hp, items: [], cuffed: 0 }));
+    this.turn = 0; this.sawed = false; this.shells = []; this.known = this.players.map(() => []);
     this.events = []; this.winner = -1;
     this.load();
   }
@@ -29,6 +29,10 @@ export class Game {
   emit(e) { e.snap = this.snap(); this.events.push(e); }
   flush() { const e = this.events; this.events = []; return e; }
   sudden(i) { return !!this.cfg.sudden && this.players[i].hp <= 2; }
+  alive(i) { return this.players[i].hp > 0; }
+  others(by) { return this.players.map((_, i) => i).filter(i => i !== by && this.alive(i)); }
+  next(i) { do i = (i + 1) % this.n; while (!this.alive(i)); return i; }
+  def(by, who) { return who >= 0 ? who : this.n === 2 ? 1 - by : this.others(by)[0] ?? -1; }
 
   randItem() {
     const keys = Object.keys(WEIGHT), tot = keys.reduce((a, k) => a + WEIGHT[k], 0);
@@ -41,12 +45,15 @@ export class Game {
     const live = Math.max(1, Math.min(n - 1, Math.round(n * (0.3 + this.rng() * 0.4))));
     const s = Array.from({ length: n }, (_, i) => i < live);
     for (let i = n - 1; i > 0; i--) { const j = Math.floor(this.rng() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; }
-    this.shells = s; this.known = [[], []]; this.sawed = false; this.turn = 0;
-    this.players.forEach(p => { p.cuffed = 0; for (let k = 0; k < (this.cfg.items || 0) && p.items.length < SLOTS; k++) p.items.push(this.randItem()); });
+    this.shells = s; this.known = this.players.map(() => []); this.sawed = false;
+    if (!this.multi) this.turn = 0;
+    this.players.forEach((p, i) => {
+      p.cuffed = 0; if (!this.alive(i)) return;
+      for (let k = 0; k < (this.cfg.items || 0) && p.items.length < this.slots; k++) p.items.push(this.randItem());
+    });
     this.emit({ t: 'load', live, blank: n - live });
   }
   shift() { this.shells.shift(); this.known.forEach(k => k.shift()); }
-  // 현재 탄이 실탄일 확률 (해당 플레이어가 아는 정보 기준)
   pLive(i) {
     const k = this.known[i][0];
     if (k !== undefined) return k ? 1 : 0;
@@ -55,56 +62,72 @@ export class Game {
     return u ? lu / u : 0;
   }
   pass() {
-    const o = 1 - this.turn, O = this.players[o];
-    if (O.cuffed === 2) { O.cuffed = 1; this.emit({ t: 'skip', p: o }); return; }
-    if (O.cuffed === 1) O.cuffed = 0;
-    this.turn = o; this.emit({ t: 'turn', p: o });
+    let o = this.next(this.turn);
+    while (o !== this.turn) {
+      const O = this.players[o];
+      if (O.cuffed === 2) { O.cuffed = 1; this.emit({ t: 'skip', p: o }); o = this.next(o); continue; }
+      if (O.cuffed === 1) O.cuffed = 0;
+      this.turn = o; this.emit({ t: 'turn', p: o }); return;
+    }
   }
-  kill(p) { if (this.players[p].hp <= 0) { this.winner = 1 - p; this.emit({ t: 'end', winner: this.winner }); return true; } return false; }
+  // 사망 처리 — 한 명만 남으면 게임 종료(true)
+  death(p) {
+    const P = this.players[p]; if (P.hp > 0) return false;
+    const left = this.others(p);
+    if (left.length <= 1) { this.winner = left[0] ?? p; this.emit({ t: 'end', winner: this.winner }); return true; }
+    P.items = []; P.cuffed = 0; this.emit({ t: 'die', p });
+    return false;
+  }
 
   shoot(by, target) {
-    if (this.over || by !== this.turn || !this.shells.length) return false;
+    if (this.over || by !== this.turn || !this.shells.length || !this.alive(target)) return false;
     const live = this.shells[0], sawed = this.sawed, dmg = live ? (sawed ? 2 : 1) : 0;
     this.shift(); this.sawed = false;
     const T = this.players[target];
     if (dmg) T.hp = Math.max(0, T.hp - dmg);
     this.emit({ t: 'shot', by, target, live, dmg, sawed });
-    if (this.kill(target)) return true;
-    if (!this.shells.length) this.load();
-    else if (!(target === by && !live)) this.pass();
+    if (this.death(target)) return true;
+    const keep = target === by && !live;
+    if (this.multi) { if (!keep || !this.alive(by)) this.pass(); if (!this.shells.length) this.load(); }
+    else if (!this.shells.length) this.load();
+    else if (!keep) this.pass();
     return true;
   }
-  canUse(by, name) {
-    const O = this.players[1 - by];
+  canUse(by, name, who = -1) {
+    const opp = who >= 0 ? [who] : this.others(by);
     switch (name) {
       case 'saw': return !this.sawed;
-      case 'cuffs': return O.cuffed === 0;
-      case 'adrenaline': return O.items.some(n => n !== 'adrenaline' && this.canUse(by, n));
+      case 'cuffs': return opp.some(o => o !== by && this.alive(o) && this.players[o].cuffed === 0);
+      case 'adrenaline': return opp.some(o => o !== by && this.alive(o) && this.players[o].items.some(n => n !== 'adrenaline' && this.canUse(by, n)));
       case 'cigs': case 'meds': return true;
       default: return this.shells.length > 0;
     }
   }
-  use(by, idx, steal = -1) {
+  use(by, idx, steal = -1, who = -1) {
     if (this.over || by !== this.turn) return false;
-    const P = this.players[by], O = this.players[1 - by];
+    const P = this.players[by];
     let name = P.items[idx];
-    if (!name || !this.canUse(by, name)) return false;
+    if (!name) return false;
+    if (name === 'cuffs' || name === 'adrenaline') { who = this.def(by, who); if (who < 0 || who === by || !this.alive(who)) return false; }
+    if (!this.canUse(by, name, name === 'cuffs' || name === 'adrenaline' ? who : -1)) return false;
     if (name === 'adrenaline') {
-      const sn = O.items[steal];
+      const O = this.players[who], sn = O.items[steal];
       if (!sn || sn === 'adrenaline' || !this.canUse(by, sn)) return false;
+      if (sn === 'cuffs' && !this.others(by).some(o => this.players[o].cuffed === 0)) return false;
       P.items.splice(idx, 1); O.items.splice(steal, 1);
-      this.emit({ t: 'item', by, item: 'adrenaline', stole: sn });
+      this.emit({ t: 'item', by, item: 'adrenaline', stole: sn, who });
       name = sn;
+      if (sn === 'cuffs') who = this.players[who].cuffed === 0 ? who : this.others(by).find(o => this.players[o].cuffed === 0);
     } else P.items.splice(idx, 1);
-    this.apply(by, name);
+    this.apply(by, name, who);
     return true;
   }
   heal(by, n) { const P = this.players[by]; if (this.sudden(by)) return 0; const h = Math.min(n, P.max - P.hp); P.hp += h; return h; }
-  apply(by, name) {
-    const P = this.players[by], O = this.players[1 - by], e = { t: 'item', by, item: name };
+  apply(by, name, who) {
+    const P = this.players[by], e = { t: 'item', by, item: name };
     switch (name) {
       case 'magnifier': e.live = this.shells[0]; this.known[by][0] = e.live; break;
-      case 'cuffs': O.cuffed = 2; break;
+      case 'cuffs': e.who = who; this.players[who].cuffed = 2; break;
       case 'saw': this.sawed = true; break;
       case 'beer': e.live = this.shells[0]; this.shift(); break;
       case 'cigs': e.heal = this.heal(by, 1); break;
@@ -124,7 +147,7 @@ export class Game {
         break;
     }
     this.emit(e);
-    if (this.kill(by)) return;
+    if (P.hp <= 0) { if (this.death(by)) return; this.pass(); if (!this.shells.length) this.load(); return; }
     if (name === 'beer' && !this.shells.length) this.load();
   }
 }
