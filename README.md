@@ -1,5 +1,7 @@
 # LIVE ROUND
 
+https://rak-kr.github.io/live-round/
+
 지하실 테이블, 산탄총 한 자루, 가면을 쓴 상대. 실탄과 공포탄이 섞인 총으로 번갈아 쏘는 테이블 호러 게임입니다.
 
 ## 모드
